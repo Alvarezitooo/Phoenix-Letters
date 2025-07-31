@@ -154,10 +154,9 @@ def main():
         st.session_state.async_service_runner.start()
 
     @st.cache_resource
-    def get_db_connection(settings: Settings):
-        db_conn = DatabaseConnection(settings)
-        st.session_state.async_service_runner.run_coro_in_thread(db_conn.initialize()).result()
-        return db_conn
+    def get_db_connection(_settings: Settings) -> DatabaseConnection:
+        """Initialise et retourne une connexion à la base de données."""
+        return DatabaseConnection(_settings)
 
     db_connection = get_db_connection(settings)
     jwt_manager = JWTManager(settings)

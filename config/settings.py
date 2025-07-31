@@ -39,12 +39,9 @@ class Settings:
     jwt_access_token_expire_minutes: int = 15
     jwt_refresh_token_expire_days: int = 30
     
-    # Database Configuration
-    db_host: Optional[str] = None
-    db_port: int = 5432
-    db_name: Optional[str] = None
-    db_user: Optional[str] = None
-    db_password: Optional[str] = None
+    # Supabase Configuration
+    supabase_url: Optional[str] = None
+    supabase_key: Optional[str] = None
     
     def __post_init__(self):
         load_dotenv(find_dotenv(), override=True)  # Force reload
@@ -56,6 +53,7 @@ class Settings:
         object.__setattr__(self, 'auth_enabled', os.getenv('AUTH_ENABLED', 'false').lower() == 'true')
         object.__setattr__(self, 'jwt_secret_key', os.getenv('JWT_SECRET_KEY'))
         object.__setattr__(self, 'jwt_refresh_secret', os.getenv('JWT_REFRESH_SECRET'))
+        print(f"DEBUG: JWT_SECRET_KEY loaded: {self.jwt_secret_key}")
         
         # JWT expiration times
         jwt_access_expire = os.getenv('JWT_ACCESS_TOKEN_EXPIRE_MINUTES')
@@ -66,15 +64,9 @@ class Settings:
         if jwt_refresh_expire:
             object.__setattr__(self, 'jwt_refresh_token_expire_days', int(jwt_refresh_expire))
         
-        # Database configuration
-        object.__setattr__(self, 'db_host', os.getenv('DB_HOST'))
-        object.__setattr__(self, 'db_name', os.getenv('DB_NAME'))
-        object.__setattr__(self, 'db_user', os.getenv('DB_USER'))
-        object.__setattr__(self, 'db_password', os.getenv('DB_PASSWORD'))
-        
-        db_port = os.getenv('DB_PORT')
-        if db_port:
-            object.__setattr__(self, 'db_port', int(db_port))
+        # Supabase configuration
+        object.__setattr__(self, 'supabase_url', self._get_required_env('SUPABASE_URL'))
+        object.__setattr__(self, 'supabase_key', self._get_required_env('SUPABASE_KEY'))
 
     def _get_required_env(self, key: str) -> str:
         value = os.getenv(key)

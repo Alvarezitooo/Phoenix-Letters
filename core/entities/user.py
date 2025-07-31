@@ -24,7 +24,7 @@ class User:
     id: uuid.UUID
     email: str
     username: Optional[str] = None
-    status: str = 'pending'
+    status: Optional[str] = 'pending'
     email_verified: bool = False
     newsletter_opt_in: bool = False
     created_at: datetime = field(default_factory=datetime.utcnow)

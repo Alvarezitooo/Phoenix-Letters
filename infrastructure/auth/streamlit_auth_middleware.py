@@ -4,13 +4,11 @@ Contient les décorateurs et les fonctions pour gérer l'accès aux pages
 et l'affichage des composants d'interface utilisateur liés à l'authentification.
 """
 import streamlit as st
-import asyncio
-from typing import Optional, Callable
+from typing import Optional
 
-from core.entities.user import User, UserTier
+from core.entities.user import User
 from infrastructure.auth.user_auth_service import UserAuthService
 from infrastructure.auth.jwt_manager import JWTManager
-from utils.async_runner import AsyncServiceRunner # Import du runner
 
 class StreamlitAuthMiddleware:
     """
@@ -20,15 +18,6 @@ class StreamlitAuthMiddleware:
     def __init__(self, auth_service: UserAuthService, jwt_manager: JWTManager):
         self.auth_service = auth_service
         self.jwt_manager = jwt_manager
-        self.async_runner: AsyncServiceRunner = st.session_state.async_service_runner
-
-    def _run_async(self, coro):
-        """Exécute une coroutine asynchrone dans le contexte de Streamlit."""
-        try:
-            loop = asyncio.get_running_loop()
-            return loop.run_until_complete(coro)
-        except RuntimeError: # Pas de boucle d'événements en cours d'exécution
-            return asyncio.run(coro)
 
     def get_current_user(self) -> Optional[User]:
         """Récupère l'utilisateur actuellement connecté depuis le token JWT stocké dans les cookies."""
@@ -46,7 +35,7 @@ class StreamlitAuthMiddleware:
             return None
 
         try:
-            return self.async_runner.run_coro_in_thread(self.auth_service.get_user_by_id(user_id)).result()
+            return self.auth_service.get_user_by_id(user_id)
         except Exception as e:
             st.error(f"Erreur de session: {e}")
             return None
@@ -65,11 +54,11 @@ class StreamlitAuthMiddleware:
 
                 if submitted:
                     try:
-                        user, access_token, refresh_token = self.async_runner.run_coro_in_thread(self.auth_service.authenticate_user(email, password)).result()
+                        user, access_token, refresh_token = self.auth_service.authenticate_user(email, password)
                         st.session_state['auth_token'] = access_token
                         st.session_state['refresh_token'] = refresh_token
-                        st.session_state['user_id'] = str(user.id) # Mettre à jour user_id dans session_state
-                        st.session_state['user_tier'] = user.subscription.current_tier # Mettre à jour user_tier
+                        st.session_state['user_id'] = str(user.id)
+                        st.session_state['user_tier'] = user.subscription.current_tier
                         st.success("Connexion réussie !")
                         st.rerun()
                         return user
@@ -87,12 +76,11 @@ class StreamlitAuthMiddleware:
 
                 if submitted:
                     try:
-                        user = self.async_runner.run_coro_in_thread(self.auth_service.register_user(email, password, username, newsletter_opt_in)).result()
+                        user = self.auth_service.register_user(email, password, username, newsletter_opt_in)
                         st.success(f"Compte créé pour {user.email} ! Vous pouvez maintenant vous connecter.")
                         # Après l'inscription, on peut rediriger vers l'onglet de connexion ou laisser l'utilisateur se connecter
                         # Pour l'instant, on ne connecte pas automatiquement après l'inscription.
                         st.rerun()
-                        return None # Ne retourne pas l'utilisateur car il n'est pas encore connecté
                     except Exception as e:
                         st.error(f"Erreur lors de l'inscription: {e}")
                         return None

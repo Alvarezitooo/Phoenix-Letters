@@ -1,4 +1,4 @@
-"""Client Google Gemini avec gestion d'erreurs robuste."""
+"""Client Google Gemini avec gestion d'erreurs robuste et tracking Green AI."""
 import streamlit as st
 import google.generativeai as genai
 from typing import Optional, Dict, Any
@@ -9,6 +9,8 @@ from config.settings import Settings
 from shared.interfaces.ai_interface import AIServiceInterface
 from shared.exceptions.specific_exceptions import AIServiceError, RateLimitError
 from core.entities.letter import UserTier
+from infrastructure.monitoring.phoenix_green_metrics import phoenix_green_metrics
+from core.services.solidarity_ecological_fund import phoenix_solidarity_fund
 
 logger = logging.getLogger(__name__)
 
@@ -36,16 +38,18 @@ class GeminiClient(AIServiceInterface):
         prompt: str, 
         user_tier: UserTier,
         max_tokens: int = 1000,
-        temperature: float = 0.7
+        temperature: float = 0.7,
+        feature_used: Optional[str] = None
     ) -> str:
         """
-        Génère du contenu avec Gemini.
+        Génère du contenu avec Gemini et tracking Green AI.
         
         Args:
             prompt: Prompt pour la génération
             user_tier: Niveau d'abonnement utilisateur
             max_tokens: Nombre maximum de tokens
             temperature: Température de génération
+            feature_used: Fonctionnalité utilisée (pour tracking)
             
         Returns:
             str: Contenu généré
@@ -54,49 +58,74 @@ class GeminiClient(AIServiceInterface):
             AIServiceError: En cas d'erreur de génération
             RateLimitError: En cas de limite de débit atteinte
         """
-        try:
-            # Configuration selon le tier utilisateur
-            generation_config = _self._get_generation_config(user_tier, max_tokens, temperature)
+        # 🌱 Démarrage du tracking Green AI
+        with phoenix_green_metrics.track_gemini_call(user_tier.value, feature_used) as tracker:
+            retry_count = 0
             
-            # Validation du prompt
-            if not prompt or len(prompt) < 10:
-                raise AIServiceError("Prompt trop court ou vide")
+            try:
+                # Configuration selon le tier utilisateur
+                generation_config = _self._get_generation_config(user_tier, max_tokens, temperature)
+                
+                # Validation du prompt
+                if not prompt or len(prompt) < 10:
+                    raise AIServiceError("Prompt trop court ou vide")
+                
+                if len(prompt) > 100000:
+                    raise AIServiceError("Prompt trop long (max 100k caractères)")
+                
+                # 🌱 Enregistrement de la requête
+                tracker.record_request(prompt)
+                
+                # Vérification cache Streamlit
+                cache_key = f"gemini_{hash(prompt)}_{user_tier.value}"
+                from_cache = hasattr(st, 'cache_data') and cache_key in st.session_state
+                
+                # Génération
+                response = _self.model.generate_content(
+                    prompt,
+                    generation_config=generation_config,
+                    request_options={"timeout": 30}
+                )
+                
+                if not response.text:
+                    raise AIServiceError("Réponse vide du service IA")
+                
+                # Validation de la réponse
+                if len(response.text) < 50:
+                    raise AIServiceError("Réponse trop courte du service IA")
+                
+                # 🌱 Enregistrement de la réponse
+                tracker.record_response(response.text, from_cache)
+                
+                # 💝🌱 Contribution au fonds solidaire-écologique
+                phoenix_solidarity_fund.contribute_from_usage(
+                    user_id=None,  # Anonyme pour RGPD
+                    user_tier=user_tier.value,
+                    trigger_event="letter_generation"
+                )
+                
+                logger.info(f"🌱💝 Content generated successfully for {user_tier.value} user - CO2 tracked + Fund contributed")
+                return response.text.strip()
+                
+            except genai.types.BlockedPromptException:
+                logger.warning("Prompt blocked by safety filters")
+                raise AIServiceError("Contenu bloqué par les filtres de sécurité")
             
-            if len(prompt) > 100000:
-                raise AIServiceError("Prompt trop long (max 100k caractères)")
+            except genai.types.StopCandidateException:
+                logger.warning("Generation stopped by safety filters")
+                raise AIServiceError("Génération interrompue par les filtres de sécurité")
             
-            # Génération
-            response = _self.model.generate_content(
-                prompt,
-                generation_config=generation_config,
-                request_options={"timeout": 30}
-            )
-            
-            if not response.text:
-                raise AIServiceError("Réponse vide du service IA")
-            
-            # Validation de la réponse
-            if len(response.text) < 50:
-                raise AIServiceError("Réponse trop courte du service IA")
-            
-            logger.info(f"Content generated successfully for {user_tier.value} user")
-            return response.text.strip()
-            
-        except genai.types.BlockedPromptException:
-            logger.warning("Prompt blocked by safety filters")
-            raise AIServiceError("Contenu bloqué par les filtres de sécurité")
-        
-        except genai.types.StopCandidateException:
-            logger.warning("Generation stopped by safety filters")
-            raise AIServiceError("Génération interrompue par les filtres de sécurité")
-        
-        except Exception as e:
-            if "quota" in str(e).lower() or "rate limit" in str(e).lower():
-                logger.error(f"Rate limit exceeded: {e}")
-                raise RateLimitError("Limite de débit API atteinte. Veuillez réessayer plus tard.")
-            
-            logger.error(f"Unexpected error in content generation: {e}")
-            raise AIServiceError(f"Erreur inattendue du service IA: {e}")
+            except Exception as e:
+                # 🌱 Enregistrement des retries
+                retry_count += 1
+                tracker.record_retry()
+                
+                if "quota" in str(e).lower() or "rate limit" in str(e).lower():
+                    logger.error(f"Rate limit exceeded: {e}")
+                    raise RateLimitError("Limite de débit API atteinte. Veuillez réessayer plus tard.")
+                
+                logger.error(f"Unexpected error in content generation: {e}")
+                raise AIServiceError(f"Erreur inattendue du service IA: {e}")
     
     def _get_generation_config(
         self, 
