@@ -13,3 +13,4 @@ pytest-mock
 protobuf
 PyJWT
 Requests
+bcrypt
