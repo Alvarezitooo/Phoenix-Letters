@@ -1,0 +1,15 @@
+# Fichiers de dépendances et d'environnement
+.env
+phoenix_env/
+venv/
+
+# Fichiers système macOS
+.DS_Store
+
+# Fichiers Python compilés et caches
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Rapports de sécurité potentiellement sensibles
+security_report.json
