@@ -1,7 +1,12 @@
 import streamlit as st
 import logging
 import asyncio
+import sys
+import os
 from datetime import datetime
+
+# Ajout du chemin vers phoenix_shared pour l'import SSO
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../phoenix_shared'))
 
 from config.settings import Settings
 from infrastructure.storage.session_manager import SecureSessionManager
@@ -26,6 +31,9 @@ from infrastructure.auth.jwt_manager import JWTManager
 from infrastructure.auth.user_auth_service import UserAuthService
 from infrastructure.auth.streamlit_auth_middleware import StreamlitAuthMiddleware
 from infrastructure.database.db_connection import DatabaseConnection
+
+# Import du système SSO Phoenix
+from auth.phoenix_sso import phoenix_sso, render_phoenix_navigation, show_phoenix_user_badge
 
 # Configuration du logger
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -54,14 +62,31 @@ def render_login_page(auth_middleware):
     st.title("🔥 Phoenix Letters - Connexion / Inscription")
     auth_middleware.login_form()
 
-def render_main_app(current_user, auth_middleware, settings):
+def render_main_app(current_user, auth_middleware, settings, phoenix_mode=False):
     """Affiche l'application principale une fois l'utilisateur authentifié ou en mode invité."""
-    if current_user:
+    
+    if phoenix_mode and current_user:
+        # Mode SSO Phoenix - Interface modernisée
+        user_name = current_user.get('full_name') or current_user.get('email', 'Phoenix User')
+        user_tier = current_user.get('user_tier', 'free').title()
+        
+        st.title(f"🔥 Phoenix Letters - {user_name}")
+        st.markdown(f"**🏆 Tier Phoenix: {user_tier}**")
+        
+        # Bouton déconnexion Phoenix dans sidebar
+        with st.sidebar:
+            if st.button("🚪 Déconnexion Phoenix", type="secondary"):
+                phoenix_sso.logout()
+                st.rerun()
+                
+    elif current_user and not phoenix_mode:
+        # Mode authentification classique
         st.title(f"🔥 Phoenix Letters - Bienvenue, {current_user.email}")
         if st.sidebar.button("Se déconnecter"):
             auth_middleware.logout()
             st.rerun()
-    else: # Mode invité
+    else: 
+        # Mode invité
         st.title("🔥 Phoenix Letters - Mode Invité")
         st.sidebar.info(
             "🚀 **Débloquez tout le potentiel de Phoenix Letters !**\n\n"
@@ -149,6 +174,32 @@ def main():
     
     settings = Settings()
 
+    # 🚀 GESTION SSO PHOENIX (Priorité absolue)
+    phoenix_user = phoenix_sso.handle_streamlit_sso('letters')
+    
+    if phoenix_user:
+        # Utilisateur connecté via SSO Phoenix - Priorité maximale
+        logger.info(f"Utilisateur Phoenix SSO authentifié: {phoenix_user.get('email')}")
+        
+        # Synchronisation profil Phoenix
+        phoenix_sso.sync_user_profile(phoenix_user, 'letters')
+        
+        # Affichage badge utilisateur Phoenix
+        show_phoenix_user_badge()
+        
+        # Navigation Phoenix dans sidebar
+        render_phoenix_navigation('letters')
+        
+        # Configuration utilisateur Phoenix
+        st.session_state.user_id = phoenix_user.get('user_id')
+        st.session_state.user_email = phoenix_user.get('email')
+        st.session_state.user_tier = UserTier.PREMIUM if phoenix_user.get('user_tier') == 'premium' else UserTier.FREE
+        st.session_state.auth_flow_choice = 'phoenix_sso'
+        
+        # Rendu application avec données Phoenix
+        render_main_app(phoenix_user, None, settings, phoenix_mode=True)
+        return
+
     if 'async_service_runner' not in st.session_state:
         st.session_state.async_service_runner = AsyncServiceRunner()
         st.session_state.async_service_runner.start()
@@ -168,13 +219,13 @@ def main():
     if 'auth_flow_choice' not in st.session_state:
         st.session_state.auth_flow_choice = None
 
-    # Aiguillage
+    # Aiguillage (mode classique si pas de SSO Phoenix)
     if current_user is None and st.session_state.auth_flow_choice is None:
         render_choice_page()
     elif current_user is None and st.session_state.auth_flow_choice == 'login':
         render_login_page(auth_middleware)
     else: # L'utilisateur est soit connecté, soit en mode invité
-        render_main_app(current_user, auth_middleware, settings)
+        render_main_app(current_user, auth_middleware, settings, phoenix_mode=False)
 
 if __name__ == "__main__":
     main()
